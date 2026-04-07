@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "app/api/order/route.ts": {
+      "regions": ["bom1"]
+    }
+  }
+}

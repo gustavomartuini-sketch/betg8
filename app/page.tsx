@@ -66,53 +66,24 @@ function MarketPanel({ event, market, onClose }: { event: EventItem | null; mark
   const handleTrade = async () => {
     if (!authenticated) { login(); return; }
     if (!market || !activeToken || !amount || parseFloat(amount) <= 0) return;
-    const wallet = wallets[0];
-    if (!wallet) return;
-    setStatus('signing'); setErrMsg('');
+    setStatus('submitting'); setErrMsg('');
     try {
-      const provider = await wallet.getEthereumProvider();
       const size = parseFloat(amount);
       const makerAmount = Math.round(size * 1e6).toString();
       const takerAmount = Math.round(payout * 1e6).toString();
-      // Only EOA wallets (MetaMask) work directly with Polymarket
-      // Privy embedded wallets need Polymarket proxy registration
-      // Determine signature type and addresses
-      // Privy embedded wallet = signatureType 1 (POLY_PROXY)
-      // MetaMask/EOA = signatureType 0
-      const isEmbedded = wallet.walletClientType === 'privy';
-      const signatureType = isEmbedded ? 1 : 0;
 
-      // For proxy wallets (signatureType 1), derive proxy address via CREATE2
-      // maker = proxy wallet address (holds funds on Polymarket)
-      // signer = EOA address (signs the order)
-      let makerAddress = wallet.address;
-      if (isEmbedded) {
-        const { ethers } = await import('ethers');
-        const PROXY_FACTORY = '0xaB45c5A4B0c941a2F231C04C3f49182e1A254052';
-        const PROXY_INIT_CODE_HASH = '0x7359d5a6f2bf43e3b46a7a1c88d6d1dea8d52f7c37d77d40b8c70c0cbb5a5e22';
-        const salt = ethers.utils.keccak256(ethers.utils.solidityPack(['address'], [wallet.address]));
-        makerAddress = ethers.utils.getCreate2Address(PROXY_FACTORY, salt, PROXY_INIT_CODE_HASH);
-      }
-
-      const orderParams = {
-        salt: Math.floor(Math.random() * 1e15).toString(),
-        maker: makerAddress,   // proxy wallet for Privy, EOA for MetaMask
-        signer: wallet.address, // always the EOA that signs
-        taker: '0x0000000000000000000000000000000000000000',
-        tokenId: activeToken.token_id,
-        makerAmount, takerAmount, expiration: '0', nonce: '0',
-        feeRateBps: '50', side: 0, signatureType,
-      };
-      const domain = { name: 'Polymarket CTF Exchange', version: '1', chainId: 137, verifyingContract: '0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E' };
-      const types = { Order: [
-        {name:'salt',type:'uint256'},{name:'maker',type:'address'},{name:'signer',type:'address'},
-        {name:'taker',type:'address'},{name:'tokenId',type:'uint256'},{name:'makerAmount',type:'uint256'},
-        {name:'takerAmount',type:'uint256'},{name:'expiration',type:'uint256'},{name:'nonce',type:'uint256'},
-        {name:'feeRateBps',type:'uint256'},{name:'side',type:'uint8'},{name:'signatureType',type:'uint8'},
-      ]};
-      const sig = await provider.request({ method: 'eth_signTypedData_v4', params: [wallet.address, JSON.stringify({ domain, types, primaryType: 'Order', message: orderParams })] });
-      setStatus('submitting');
-      const res = await fetch('/api/order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signedOrder: { ...orderParams, signature: sig } }) });
+      // Server-side signing — no wallet signature needed from user
+      const res = await fetch('/api/order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tokenId: activeToken.token_id,
+          side: outcome === 'Yes' ? 'BUY' : 'SELL',
+          makerAmount,
+          takerAmount,
+          orderType: 'FOK',
+        })
+      });
       const d = await res.json();
       if (d.success || d.orderId) { setStatus('done'); setAmount(''); }
       else { setErrMsg(d.error || 'Failed'); setStatus('error'); }
